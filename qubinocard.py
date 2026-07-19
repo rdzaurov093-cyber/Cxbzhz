@@ -1,3 +1,4 @@
+import os
 import asyncio
 import sqlite3
 import random
@@ -10,7 +11,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-BOT_TOKEN = ""
+BOT_TOKEN = os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 OWNER_ID = 8816073474 # Главный админ (создатель)
 
 # --- Эмодзи константы ---
