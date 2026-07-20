@@ -30,10 +30,7 @@ E_R_PRO = "<tg-emoji emoji-id='5321224605820543819'>🥈</tg-emoji>"
 E_R_MASTER = "<tg-emoji emoji-id='5321243632525665003'>🥇</tg-emoji>"
 E_ID = "<tg-emoji emoji-id='6035244918572587491'>🆔</tg-emoji>"
 E_LINE = "<tg-emoji emoji-id='5467796120052706892'>➖</tg-emoji>" * 10
-
-# ИСПРАВЛЕНО: Убран нерабочий ID, чтобы бот не падал с ошибкой DOCUMENT_INVALID
 E_GIFT = "💝" 
-
 E_EXP = "<tg-emoji emoji-id='5222187272769654422'>✨</tg-emoji>"
 
 # Эмодзи админов и брака
@@ -96,9 +93,6 @@ class AdminGive(StatesGroup):
     waiting_for_user_donat, waiting_for_amount_donat = State(), State()
     waiting_for_user_vip = State()
 
-class ConvertDonat(StatesGroup):
-    waiting_for_amount = State()
-
 # --- База Данных ---
 def init_db():
     conn = sqlite3.connect('qubino.db')
@@ -112,7 +106,6 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS rp_commands (trigger TEXT PRIMARY KEY, action TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS admins (user_id INTEGER PRIMARY KEY, name TEXT, prefix TEXT DEFAULT 'Админ')''')
     
-    # Новые таблицы для магазина и подарков
     c.execute('''CREATE TABLE IF NOT EXISTS pets (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, description TEXT, media_id TEXT, price INTEGER)''')
     c.execute('''CREATE TABLE IF NOT EXISTS gifts (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, action TEXT, price INTEGER, exp INTEGER)''')
     
@@ -179,14 +172,11 @@ class IsAdmin(Filter):
 
 @dp.message(Command("emojico"), IsAdmin())
 async def cmd_emojico(message: Message):
-    # Проверяем реплай или само сообщение
     target_message = message.reply_to_message if message.reply_to_message else message
-    
     if target_message.entities:
         for entity in target_message.entities:
             if entity.type == "custom_emoji":
                 return await message.answer(f"ID премиум эмодзи: <code>{entity.custom_emoji_id}</code>")
-                
     await message.answer("Премиум эмодзи не найден. Отправьте команду вместе с эмодзи (например: /emojico 🎁) или сделайте реплай на сообщение с ним.")
 
 @dp.message(Command("admin"))
@@ -404,7 +394,7 @@ async def delete_card_action(callback: CallbackQuery):
     conn = sqlite3.connect('qubino.db')
     c = conn.cursor()
     c.execute("DELETE FROM cards WHERE id = ?", (card_id,))
-    c.execute("DELETE FROM inventory WHERE card_id = ?", (card_id,)) # Удаляем у игроков тоже
+    c.execute("DELETE FROM inventory WHERE card_id = ?", (card_id,)) 
     conn.commit()
     conn.close()
     await callback.message.edit_text(f"{E_SUCCESS} Карточка ID <b>{card_id}</b> полностью удалена из базы и инвентарей игроков.",
@@ -727,6 +717,8 @@ async def cb_mycard(callback: CallbackQuery):
     await callback.message.answer_photo(photo=media_id, caption=caption)
     await callback.answer()
 
+# --- СБОРКА КАРТОЧКИ (РАЗДЕЛЕННЫЕ ХЭНДЛЕРЫ ДЛЯ ИСКЛЮЧЕНИЯ БАГОВ) ---
+
 def get_card_builder_kb(card_data: dict = None):
     if card_data is None: card_data = {}
     kb = [
@@ -744,26 +736,34 @@ async def start_add_card(callback: CallbackQuery, state: FSMContext):
     await state.update_data(media_id=None, name=None, description=None, rarity=None)
     await callback.message.edit_text("Сборка новой карточки:", reply_markup=get_card_builder_kb({}))
 
-@dp.callback_query(F.data.in_({"add_media", "add_name", "add_desc", "add_rarity"}), IsAdmin())
-async def process_card_buttons(callback: CallbackQuery, state: FSMContext):
-    if callback.data == "add_media":
-        await callback.message.answer("Отправьте фото для карточки:")
-        await state.set_state(AddCard.waiting_for_media)
-    elif callback.data == "add_name":
-        await callback.message.answer("Отправьте название карточки:")
-        await state.set_state(AddCard.waiting_for_name)
-    elif callback.data == "add_desc":
-        await callback.message.answer("Отправьте описание карточки:")
-        await state.set_state(AddCard.waiting_for_description)
-    elif callback.data == "add_rarity":
-        rarity_kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⚪️ Обычная", callback_data="setrarity_Обычная")],
-            [InlineKeyboardButton(text="🟢 Необычная", callback_data="setrarity_Необычная")],
-            [InlineKeyboardButton(text="🔵 Редкая", callback_data="setrarity_Редкая")],
-            [InlineKeyboardButton(text="🟣 Эпическая", callback_data="setrarity_Эпическая")],
-            [InlineKeyboardButton(text="🟡 Легендарная", callback_data="setrarity_Легендарная")]
-        ])
-        await callback.message.answer("Выберите редкость:", reply_markup=rarity_kb)
+@dp.callback_query(F.data == "add_media", IsAdmin())
+async def process_add_media(callback: CallbackQuery, state: FSMContext):
+    await callback.message.answer("Отправьте фото для карточки:")
+    await state.set_state(AddCard.waiting_for_media)
+    await callback.answer()
+
+@dp.callback_query(F.data == "add_name", IsAdmin())
+async def process_add_name(callback: CallbackQuery, state: FSMContext):
+    await callback.message.answer("Отправьте название карточки:")
+    await state.set_state(AddCard.waiting_for_name)
+    await callback.answer()
+
+@dp.callback_query(F.data == "add_desc", IsAdmin())
+async def process_add_desc(callback: CallbackQuery, state: FSMContext):
+    await callback.message.answer("Отправьте описание карточки:")
+    await state.set_state(AddCard.waiting_for_description)
+    await callback.answer()
+
+@dp.callback_query(F.data == "add_rarity", IsAdmin())
+async def process_add_rarity(callback: CallbackQuery, state: FSMContext):
+    rarity_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⚪️ Обычная", callback_data="setrarity_Обычная")],
+        [InlineKeyboardButton(text="🟢 Необычная", callback_data="setrarity_Необычная")],
+        [InlineKeyboardButton(text="🔵 Редкая", callback_data="setrarity_Редкая")],
+        [InlineKeyboardButton(text="🟣 Эпическая", callback_data="setrarity_Эпическая")],
+        [InlineKeyboardButton(text="🟡 Легендарная", callback_data="setrarity_Легендарная")]
+    ])
+    await callback.message.answer("Выберите редкость:", reply_markup=rarity_kb)
     await callback.answer()
 
 @dp.callback_query(F.data.startswith("setrarity_"), IsAdmin())
@@ -860,9 +860,8 @@ async def handle_rp_commands(message: Message):
 
 async def main():
     init_db()
-    print("Бот Qubino Card (Обновление: Подарки, Питомцы, Управление и Emojico) запущен!")
+    print("Бот Qubino Card (Разделенные хэндлеры кнопок) запущен!")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
-
